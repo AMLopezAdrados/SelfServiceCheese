@@ -877,7 +877,7 @@ function renderWelcome() {
         ? `<p class="closed">${icon('alert')} This desk is not open right now. Please order at the counter.</p>`
         : `<button class="btn btn-primary btn-lg cta" data-action="start">Tap to start your order ${icon('right')}</button>`}
       <p class="fine">${icon('card')} Card payments only &middot; No cash at this desk</p>
-      ${currency !== 'EUR' ? `<p class="fine-sub">Prices in ${currency === 'USD' ? 'dollars' : currency}; your card is charged in euros at today&rsquo;s rate.</p>` : ''}
+      ${isLive() && currency !== 'EUR' ? `<p class="fine-sub">Prices in ${currency === 'USD' ? 'dollars' : currency}; your card is charged in euros at today&rsquo;s rate.</p>` : ''}
     </div></div>
     ${isDemo() ? `<div class="welcome-demo">${demoButton()}</div>` : ''}
   </section>`;
