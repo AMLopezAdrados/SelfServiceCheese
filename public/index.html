@@ -858,7 +858,9 @@ function productCard(p) {
    Screens
    ========================================================================== */
 function renderWelcome() {
-  const closed = isLive() && !live.ready;
+  // Served by a kiosk server with a POS behind it, but not ready to sell
+  // (e.g. SumUp missing, no open day): customers cannot start an order.
+  const closed = settings.mode !== 'demo' && !live.ready && !!(live.status && live.status.pos.configured);
   app.innerHTML = `<section class="screen welcome" ${closed ? '' : 'data-action="start"'} aria-label="Start your order">
     <div class="spots">${spot('a', 'spot-a')}${spot('b', 'spot-b')}${spot('c', 'spot-c')}${spot('c', 'spot-d')}</div>
     <button class="staff-hotspot" data-action="logo-tap" aria-label="Staff"></button>
@@ -909,6 +911,10 @@ function renderRail() {
 }
 function renderCategory() {
   const c = catById[state.cat];
+  if (!c) {
+    $('#content').innerHTML = `<div class="cat-head"><h2>Nothing on sale right now</h2><p>Please order at the counter.</p></div>`;
+    return;
+  }
   const items = PRODUCTS.filter(p => p.cat === c.id);
   const deal = isDemo() && (c.id === 'cheese' || c.id === 'mustard') ? `<div class="deal">${icon('gift')}<div><b>Buy ${DEAL_EVERY} cheeses, get a mustard free</b><span>Add any ${DEAL_EVERY} pieces of cheese and one jar of mustard is on us.</span></div></div>` : '';
   const content = $('#content');
@@ -1336,7 +1342,9 @@ function staffHtml() {
     ? `<div class="pstat"><i class="dot on"></i>Connected: ${esc(Printer.name)}</div>`
     : `<div class="pstat"><i class="dot ${Printer.lastError ? 'bad' : ''}"></i>${Printer.connecting ? 'Connecting…' : 'No printer connected'}</div>`;
   return `<div class="drawer-head"><h2 id="st-h">Staff &amp; demo</h2><button class="icon-btn" data-action="modal-close" aria-label="Close">${icon('x')}</button></div>
-    <p class="note">${isDemo() ? 'Demo mode: card payments are simulated and nothing is charged. ' : ''}On the kiosk this panel opens by tapping the logo 5 times and entering the staff PIN (demo PIN: ${STAFF_PIN}).</p>
+    <p class="note">${hasServer()
+      ? (settings.mode === 'demo' ? 'Demo / training: card payments are simulated and nothing is charged.' : (live.ready ? 'Live: real prices and real card payments.' : 'Not live yet: see below what is missing.'))
+      : `Demo: card payments are simulated and nothing is charged. This panel opens by tapping the logo 5 times (demo PIN: ${STAFF_PIN}).`}</p>
 
     <div class="sec">
       <h3>Mode</h3>
@@ -1349,7 +1357,7 @@ function staffHtml() {
     ${settings.mode !== 'demo' && live.status && live.status.pos.ok ? `
     <div class="sec">
       <h3>Products on this kiosk</h3>
-      <p>${PRODUCTS.length} product${PRODUCTS.length === 1 ? '' : 's'} on sale. Products and prices come from the POS; here you choose which categories and products the kiosk offers.</p>
+      <p>${live.status.pos.products} of the event&rsquo;s products switched on. Products and prices come from the POS; here you choose which categories and products the kiosk offers.</p>
       <div class="row"><button class="btn btn-primary" data-action="asm-open">${icon('settings')}Choose products</button></div>
     </div>` : ''}
 
