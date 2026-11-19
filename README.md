@@ -109,7 +109,18 @@ app op het toestel praat en heeft geen Cloud API.
   hij elk bonnetje meteen, zonder printvenster. Dit werkt in Chrome, niet op een
   iPad of iPhone, en niet in apps of kioskbrowsers die op Android WebView draaien.
 
+## Producten op de kiosk
+
+Alle producten en prijzen komen uit de prijslijst van het event in de POS. In
+het personeelsmenu (5× logo, PIN) kies je onder **Choose products** per
+categorie en per product of de kiosk het verkoopt. Dat wordt op de kioskserver
+bewaard (`KIOSK_DATA_DIR/assortment.json`), niet in de POS. Nieuwe producten in
+de POS staan automatisch aan; een uitgezet product kan de kiosk ook niet
+verkopen als iemand het toch probeert.
+
 ## Waar de server draait
+
+Zie [DEPLOYMENT.md](DEPLOYMENT.md) voor de VPS (naast de POS).
 
 Overal waar Node draait en internet is: op de VPS naast de POS (bijvoorbeeld
 `kiosk.olgascheese.net` achter nginx met HTTPS — dan zet je `KIOSK_PUBLIC_URL`
@@ -143,5 +154,7 @@ TypeScript-SDK (`@sumup/sdk`).
 | `src/orders.ts` | Eén bestelling: POS-verkoop, betaling op de Solo, afhandeling |
 | `src/sumup.ts` | SumUp Cloud API (Solo), plus de virtuele Solo |
 | `src/pos.ts` | De POS-API als client |
+| `src/assortment.ts` | Welke categorieën/producten de kiosk verkoopt |
 | `scripts/` | `npm run pair` en `npm run readers` |
+| `deploy/` | systemd-service en nginx-config voor de VPS |
 | `test/` | Tests en de nagebootste POS |

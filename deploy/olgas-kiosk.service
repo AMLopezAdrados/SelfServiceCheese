@@ -1,0 +1,23 @@
+# /etc/systemd/system/olgas-kiosk.service
+[Unit]
+Description=Olga's Cheese self-service kiosk
+After=network.target olgas-pos.service
+Wants=olgas-pos.service
+
+[Service]
+User=kiosk
+WorkingDirectory=/home/kiosk/app
+EnvironmentFile=/home/kiosk/app/.env
+ExecStart=/usr/bin/node --import tsx src/index.ts
+Restart=always
+RestartSec=3
+# Settings the kiosk writes itself (which products are on sale) live in
+# /home/kiosk/app/data; nothing else on the system is writable for it.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/kiosk/app/data
+
+[Install]
+WantedBy=multi-user.target

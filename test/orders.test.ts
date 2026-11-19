@@ -21,6 +21,7 @@ function config(overrides: Partial<Config> = {}, posUrl = ''): Config {
     POS_USERNAME: 'kiosk',
     POS_PIN: '2468',
     KIOSK_STAFF_PIN: '4321',
+    KIOSK_DATA_DIR: '',
   });
   return { ...base, ...overrides };
 }
@@ -220,4 +221,41 @@ test('SumUp never answers: the order becomes "stuck" for staff instead of lettin
   } finally {
     await slow.close();
   }
+});
+
+test('assortment: staff switch categories and products off; the kiosk hides them and refuses to sell them', async () => {
+  const pin = { 'x-staff-pin': '4321' };
+  assert.equal((await k.call('GET', '/api/admin/assortment')).status, 403);
+  assert.equal((await k.call('GET', '/api/admin/assortment', undefined, { 'x-staff-pin': '0000' })).status, 403);
+  const all = (await k.call('GET', '/api/admin/assortment', undefined, pin)).json;
+  assert.deepEqual(all.categories.map((c: any) => [c.name, c.enabled, c.products.length]), [['kaas', true, 2], ['mosterd', true, 1]]);
+
+  const mosterd = all.categories.find((c: any) => c.name === 'mosterd');
+  const jong = all.categories.find((c: any) => c.name === 'kaas').products.find((p: any) => p.name === 'Gouda jong');
+  const saved = await k.call('PUT', '/api/admin/assortment', { disabled_categories: [mosterd.id], disabled_products: [jong.id] }, pin);
+  assert.equal(saved.status, 200);
+  assert.equal(saved.json.visible_products, 1);
+
+  const shown = (await k.call('GET', '/api/catalogue')).json;
+  assert.deepEqual(shown.products.map((p: any) => p.name), ['Gouda oud']);
+  const refused = await k.call('POST', '/api/orders', { lines: [{ product_id: jong.id, qty: 1 }] });
+  assert.equal(refused.status, 400);
+  assert.match(refused.json.error, /not available/);
+  assert.equal((await k.call('GET', '/api/status')).json.pos.products, 1);
+
+  assert.equal((await k.call('PUT', '/api/admin/assortment', { disabled_categories: 'x', disabled_products: [] }, pin)).status, 400);
+  await k.call('PUT', '/api/admin/assortment', { disabled_categories: [], disabled_products: [] }, pin);
+  assert.equal((await k.call('GET', '/api/catalogue')).json.products.length, 3);
+});
+
+test('assortment is kept in a file and survives a restart', async () => {
+  const { mkdtempSync, readFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { AssortmentStore } = await import('../src/assortment.ts');
+  const file = join(mkdtempSync(join(tmpdir(), 'kiosk-')), 'sub', 'assortment.json');
+  new AssortmentStore(file).save(['cat-1'], ['prod-1', 'prod-1']);
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).disabledProducts, ['prod-1']);
+  const again = new AssortmentStore(file).get();
+  assert.deepEqual([again.disabledCategories, again.disabledProducts], [['cat-1'], ['prod-1']]);
 });

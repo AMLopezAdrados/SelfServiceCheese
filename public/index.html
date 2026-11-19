@@ -478,6 +478,19 @@ h1,h2,h3,p{margin:0}
 .pstat .dot.bad{background:var(--red)}
 .seg{display:inline-flex;background:var(--canvas);border-radius:999px;padding:4px;margin-top:12px;box-shadow:inset 0 0 0 1px var(--line)}
 .seg button{min-height:42px;padding:0 16px;border-radius:999px;font-weight:700;font-size:15px;color:var(--ink-2)}
+.asm-cat{margin-top:14px;border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.asm-row{display:flex;align-items:center;gap:12px;padding:10px 14px;min-height:58px}
+.asm-cat>.asm-row{background:var(--canvas);font-weight:800;font-size:17px}
+.asm-row+.asm-row{border-top:1px solid var(--line)}
+.asm-row .nm{flex:1;min-width:0}
+.asm-row .nm small{display:block;font-weight:600;color:var(--muted);font-size:13px}
+.asm-cat.off .asm-prod{opacity:.45}
+.switch{width:56px;height:32px;border-radius:999px;background:#cfc6b6;position:relative;flex:none;transition:background-color .15s}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .15s}
+.switch[aria-checked="true"]{background:var(--green)}
+.switch[aria-checked="true"]::after{transform:translateX(24px)}
+.asm-foot{position:sticky;bottom:-32px;background:#fff;padding:14px 0 6px;margin-top:16px;display:flex;gap:10px;border-top:1px solid var(--line)}
+.asm-foot .btn{flex:1;min-height:52px;font-size:17px}
 .seg button.on{background:#fff;color:var(--ink);box-shadow:0 2px 6px -2px rgba(0,0,0,.25)}
 .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
 .stat{background:var(--canvas);border-radius:16px;padding:12px 14px}
@@ -1225,6 +1238,7 @@ function openModal(html, kind, side = false) {
   modalKind = kind;
 }
 function closeModal() {
+  if (modalKind === 'staff') staffPin = '';
   clearInterval(idleTimer);
   overlayRoot.innerHTML = '';
   modalKind = null;
@@ -1298,7 +1312,7 @@ function pinKey(k) {
   $$('i', dots).forEach((d, i) => d.classList.toggle('on', i < pinValue.length));
   if (pinValue.length === 4) {
     const typed = pinValue;
-    checkStaffPin(typed).then(ok => { if (ok) setTimeout(openStaff, 150); else wrongPin(dots); });
+    checkStaffPin(typed).then(ok => { if (ok) { staffPin = typed; setTimeout(openStaff, 150); } else wrongPin(dots); });
   }
 }
 function wrongPin(dots) {
@@ -1332,6 +1346,12 @@ function staffHtml() {
       </div>
       ${settings.mode === 'demo' ? '<p class="note">Demo: products and card payments are simulated, nothing is recorded in the POS.</p>' : liveStatusHtml()}
     </div>
+    ${settings.mode !== 'demo' && live.status && live.status.pos.ok ? `
+    <div class="sec">
+      <h3>Products on this kiosk</h3>
+      <p>${PRODUCTS.length} product${PRODUCTS.length === 1 ? '' : 's'} on sale. Products and prices come from the POS; here you choose which categories and products the kiosk offers.</p>
+      <div class="row"><button class="btn btn-primary" data-action="asm-open">${icon('settings')}Choose products</button></div>
+    </div>` : ''}
 
     <div class="sec">
       <h3>Receipt printer (USB)</h3>
@@ -1387,12 +1407,12 @@ function staffHtml() {
    ========================================================================== */
 const live = { ready: false, status: null, error: '', order: null };
 
-async function api(method, path, body) {
+async function api(method, path, body, extraHeaders = {}) {
   let res;
   try {
     res = await fetch('api' + path, {
       method,
-      headers: { 'content-type': 'application/json', ...(settings.kioskKey ? { 'x-kiosk-key': settings.kioskKey } : {}) },
+      headers: { 'content-type': 'application/json', ...(settings.kioskKey ? { 'x-kiosk-key': settings.kioskKey } : {}), ...extraHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
@@ -1552,6 +1572,62 @@ async function cancelLivePayment() {
     if (state.pay !== attempt) return;
     state.declineDetail = err.message;
     paymentResult('stuck');
+  }
+}
+
+/* Staff: which POS categories and products the kiosk offers. */
+let staffPin = '';
+const asm = { data: null, offCats: new Set(), offProds: new Set(), busy: false, error: '' };
+async function openAssortment() {
+  if (!staffPin) { openPin(); return; }
+  asm.error = ''; asm.busy = true; showAssortment();
+  try {
+    asm.data = await api('GET', '/admin/assortment', undefined, { 'x-staff-pin': staffPin });
+    asm.offCats = new Set(asm.data.categories.filter(c => !c.enabled).map(c => c.id));
+    asm.offProds = new Set(asm.data.categories.flatMap(c => c.products.filter(p => !p.enabled).map(p => p.id)));
+  } catch (err) {
+    asm.error = err.status === 403 ? 'The staff PIN is no longer valid. Close this panel and open it again.' : err.message;
+  }
+  asm.busy = false; showAssortment();
+}
+function showAssortment() { const el = $('#staff'); if (el) el.innerHTML = assortmentHtml(); }
+function assortmentHtml() {
+  const head = `<div class="drawer-head"><h2 id="st-h">Products on this kiosk</h2><button class="icon-btn" data-action="asm-back" aria-label="Back">${icon('left')}</button></div>`;
+  if (asm.busy && !asm.data) return head + '<p class="note">Loading the price list from the POS…</p>';
+  if (!asm.data) return head + `<div class="err">${esc(asm.error)}</div>`;
+  const sym = SYMBOLS[asm.data.currency] || asm.data.currency + ' ';
+  const sw = (on, action, id, label) => `<button class="switch" role="switch" aria-checked="${on}" aria-label="${esc(label)}" data-action="${action}" data-id="${id}"></button>`;
+  const cats = asm.data.categories.map(c => {
+    const catOn = !asm.offCats.has(c.id);
+    const shown = catOn ? c.products.filter(p => !asm.offProds.has(p.id)).length : 0;
+    return `<div class="asm-cat ${catOn ? '' : 'off'}">
+      <div class="asm-row"><span class="nm">${esc(categoryLabel(c.name))}<small>${shown} of ${c.products.length} on the kiosk</small></span>${sw(catOn, 'asm-cat', c.id, categoryLabel(c.name))}</div>
+      ${c.products.map(p => `<div class="asm-row asm-prod"><span class="nm">${esc(p.name)}<small>${sym}${num2(p.price)}</small></span>${sw(!asm.offProds.has(p.id), 'asm-prod', p.id, p.name)}</div>`).join('')}
+    </div>`;
+  }).join('');
+  return `${head}
+    <p class="note">Event: <b>${esc(asm.data.event)}</b>. New products in the POS appear on the kiosk automatically; switch off what the kiosk should not sell. Prices are changed in the POS.</p>
+    ${asm.error ? `<div class="err">${esc(asm.error)}</div>` : ''}
+    ${cats || '<p class="note">The price list of this event is empty.</p>'}
+    <div class="asm-foot">
+      <button class="btn btn-secondary" data-action="asm-back">Cancel</button>
+      <button class="btn btn-primary" data-action="asm-save" ${asm.busy ? 'disabled' : ''}>${icon('check')}${asm.busy ? 'Saving…' : 'Save'}</button>
+    </div>`;
+}
+function toggleIn(set, id) { if (set.has(id)) set.delete(id); else set.add(id); showAssortment(); }
+async function saveAssortment() {
+  asm.busy = true; asm.error = ''; showAssortment();
+  try {
+    await api('PUT', '/admin/assortment', { disabled_categories: [...asm.offCats], disabled_products: [...asm.offProds] }, { 'x-staff-pin': staffPin });
+    asm.busy = false; asm.data = null;
+    await applyCatalogue();
+    refreshStaff();
+    // Re-draw behind the open panel (goto would close it).
+    if (state.screen === 'welcome') renderWelcome();
+    else if (state.screen === 'menu') renderMenu();
+    announce('Products saved.');
+  } catch (err) {
+    asm.busy = false; asm.error = 'Not saved: ' + err.message; showAssortment();
   }
 }
 
@@ -1923,6 +1999,11 @@ const actions = {
     if (k === 'mode') { applyCatalogue().then(() => { refreshStaff(); if (state.screen === 'welcome') renderWelcome(); }); }
     refreshStaff();
   },
+  'asm-open': () => openAssortment(),
+  'asm-cat': el => toggleIn(asm.offCats, el.dataset.id),
+  'asm-prod': el => toggleIn(asm.offProds, el.dataset.id),
+  'asm-save': () => saveAssortment(),
+  'asm-back': () => { asm.data = null; refreshStaff(); },
   'live-refresh': () => applyCatalogue().then(() => { refreshStaff(); if (state.screen === 'welcome') renderWelcome(); }),
 };
 document.addEventListener('click', e => {

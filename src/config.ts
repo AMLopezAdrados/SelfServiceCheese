@@ -22,9 +22,11 @@ export interface PosConfig {
 
 export interface Config {
   port: number;
+  host: string;
   accessKey: string | null;
   staffPin: string;
   publicUrl: string;
+  dataDir: string | null;
   pos: PosConfig;
   sumup: SumUpConfig;
 }
@@ -33,9 +35,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const delay = Number(env.SUMUP_MOCK_DELAY_MS);
   return {
     port: Number(env.PORT ?? 8080),
+    // 127.0.0.1 behind nginx on the VPS; 0.0.0.0 to reach it on a local network.
+    host: env.HOST || '0.0.0.0',
     accessKey: env.KIOSK_ACCESS_KEY || null,
     staffPin: env.KIOSK_STAFF_PIN || '1234',
     publicUrl: (env.KIOSK_PUBLIC_URL || '').replace(/\/$/, ''),
+    // Where the kiosk keeps its own settings (assortment). null = memory only.
+    dataDir: env.KIOSK_DATA_DIR === '' ? null : env.KIOSK_DATA_DIR || 'data',
     pos: {
       url: (env.POS_URL || '').replace(/\/$/, ''),
       username: env.POS_USERNAME || '',

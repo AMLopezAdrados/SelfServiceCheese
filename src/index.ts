@@ -6,8 +6,8 @@ const cfg = loadConfig();
 const { app, orders, sumup, pos } = createApp(cfg);
 orders.start();
 
-const server = app.listen(cfg.port, () => {
-  console.log(`Olga's Cheese kiosk on http://localhost:${cfg.port}`);
+const server = app.listen(cfg.port, cfg.host, () => {
+  console.log(`Olga's Cheese kiosk on http://${cfg.host}:${cfg.port}`);
   console.log(`  POS:   ${pos.configured ? cfg.pos.url : 'not configured (demo only)'}`);
   console.log(`  SumUp: ${sumup.mock ? 'virtual Solo (SUMUP_MOCK=true)' : sumup.configured ? `reader ${sumup.defaultReaderId ?? 'NOT CHOSEN'}` : 'not configured (demo only)'}`);
 });

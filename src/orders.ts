@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { AssortmentStore } from './assortment.ts';
 import type { Config } from './config.ts';
 import { HttpError, round2, sleep } from './http.ts';
 import type { PosClient, SaleItem } from './pos.ts';
@@ -70,6 +71,7 @@ export class Orders {
     private readonly pos: PosClient,
     private readonly cfg: Config,
     options: OrdersOptions = {},
+    private readonly assortment: AssortmentStore | null = null,
   ) {
     // The Solo gives up on a waiting payment well before this.
     this.stuckAfterMs = options.stuckAfterMs ?? 4 * 60_000;
@@ -108,6 +110,7 @@ export class Orders {
     const items: SaleItem[] = [...qtyById].map(([productId, qty]) => {
       const product = catalogue.products.find((p) => p.id === productId);
       if (!product) throw new HttpError(400, 'a product in this order is no longer on the price list');
+      if (this.assortment && !this.assortment.isAvailable(product)) throw new HttpError(400, `${product.name} is not available at the kiosk right now`);
       return { product_id: product.id, name_at_sale: product.name, unit_price_at_sale: product.price, qty };
     });
     const amountLocal = round2(items.reduce((sum, i) => sum + i.unit_price_at_sale * i.qty, 0));

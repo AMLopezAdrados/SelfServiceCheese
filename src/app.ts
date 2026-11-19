@@ -1,6 +1,8 @@
 import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import { join } from 'node:path';
+import { AssortmentStore } from './assortment.ts';
 import type { Config } from './config.ts';
 import { asyncHandler, errorHandler, HttpError } from './http.ts';
 import { Orders, orderView, type OrdersOptions } from './orders.ts';
@@ -19,15 +21,23 @@ export interface AppDeps {
   sumup?: SumUpClient;
   pos?: PosClient;
   orders?: OrdersOptions;
+  assortment?: AssortmentStore;
 }
 
 export function createApp(cfg: Config, deps: AppDeps = {}) {
   const sumup = deps.sumup ?? new SumUpClient(cfg.sumup);
   const pos = deps.pos ?? new PosClient(cfg.pos);
-  const orders = new Orders(sumup, pos, cfg, deps.orders);
+  const assortment = deps.assortment ?? new AssortmentStore(cfg.dataDir ? join(cfg.dataDir, 'assortment.json') : null);
+  const orders = new Orders(sumup, pos, cfg, deps.orders, assortment);
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '64kb' }));
+  app.set('trust proxy', 'loopback');
+
+  // For systemd/uptime checks; says nothing about the POS or SumUp.
+  app.get('/health', (_req, res) => {
+    res.json({ ok: true });
+  });
 
   // SumUp's return_url. Public (SumUp has no kiosk key), logged, and only
   // ever a reason to look again: the outcome is read from SumUp's API.
@@ -64,7 +74,7 @@ export function createApp(cfg: Config, deps: AppDeps = {}) {
       res.json({
         live: catalogue.ok && sumup.configured && !!readerId,
         pos: catalogue.ok
-          ? { configured: true, ok: true, event: catalogue.c.event.name, currency: catalogue.c.currency, rate: catalogue.c.rate, products: catalogue.c.products.length }
+          ? { configured: true, ok: true, event: catalogue.c.event.name, currency: catalogue.c.currency, rate: catalogue.c.rate, products: assortment.filter(catalogue.c).products.length }
           : { configured: pos.configured, ok: false, error: catalogue.error },
         sumup: {
           configured: sumup.configured,
@@ -83,8 +93,38 @@ export function createApp(cfg: Config, deps: AppDeps = {}) {
   app.get(
     '/api/catalogue',
     asyncHandler(async (_req, res) => {
+      res.json(assortment.filter(await pos.catalogue()));
+    }),
+  );
+
+  // --- Staff: which POS categories/products the kiosk offers ---------------
+  // Same PIN as the staff panel, sent as x-staff-pin.
+  const requireStaff = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const pin = req.header('x-staff-pin') ?? '';
+    if (pin && sameSecret(pin, cfg.staffPin)) return next();
+    res.status(403).json({ error: 'staff PIN required' });
+  };
+
+  app.get(
+    '/api/admin/assortment',
+    requireStaff,
+    asyncHandler(async (_req, res) => {
+      const c = await pos.catalogue(true);
+      res.json({ event: c.event.name, currency: c.currency, updated_at: assortment.get().updatedAt, categories: assortment.overview(c) });
+    }),
+  );
+
+  app.put(
+    '/api/admin/assortment',
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const ids = (v: unknown) => (Array.isArray(v) && v.length <= 2000 && v.every((x) => typeof x === 'string') ? (v as string[]) : null);
+      const cats = ids(req.body?.disabled_categories);
+      const prods = ids(req.body?.disabled_products);
+      if (!cats || !prods) throw new HttpError(400, 'disabled_categories and disabled_products must be arrays of ids');
+      const saved = assortment.save(cats, prods);
       const c = await pos.catalogue();
-      res.json(c);
+      res.json({ updated_at: saved.updatedAt, categories: assortment.overview(c), visible_products: assortment.filter(c).products.length });
     }),
   );
 
@@ -119,5 +159,5 @@ export function createApp(cfg: Config, deps: AppDeps = {}) {
   app.use(express.static(PUBLIC_DIR, { extensions: ['html'], maxAge: 0 }));
   app.use(errorHandler);
 
-  return { app, orders, sumup, pos };
+  return { app, orders, sumup, pos, assortment };
 }
